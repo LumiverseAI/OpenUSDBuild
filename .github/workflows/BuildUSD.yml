@@ -7,6 +7,9 @@ on:
 
 jobs:
   build:
+    # Publish creates the release; the organization's default token is read-only.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
