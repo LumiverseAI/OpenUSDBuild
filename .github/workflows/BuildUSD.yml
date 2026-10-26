@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-2022
@@ -69,6 +70,10 @@ jobs:
 
     - name: Build (Linux)
       if: runner.os == 'Linux'
+      # The runner image's OpenJPEG ships a broken CMake config (empty
+      # version, missing targets) that OpenImageIO 3.1 rejects at configure.
+      env:
+        USE_OPENJPEG: '0'
       run: |
           python build_scripts/build_usd.py ./Build/${{ matrix.variant_name }} --build-variant ${{ matrix.variant }} --generator Ninja --materialx --onetbb --draco --openimageio --python-install-dir lib/python
 
