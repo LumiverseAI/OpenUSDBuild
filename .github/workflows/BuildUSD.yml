@@ -38,6 +38,19 @@ jobs:
           repository: PixarAnimationStudios/OpenUSD
           ref: v26.11.1
 
+    # Lumengine's patches (patches/README.md) live in this repository.
+    - uses: actions/checkout@v4
+      with:
+          path: .lumengine
+
+    - name: Apply Lumengine patches
+      shell: bash
+      run: |
+          for patch in .lumengine/patches/*.patch; do
+            echo "Applying $patch"
+            git apply --ignore-whitespace "$patch"
+          done
+
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
       run: |
@@ -124,8 +137,9 @@ jobs:
       id: archive
       shell: pwsh
       run: |
-          $tagName = & git describe --tags
-          $version = $tagName.TrimStart("v")
+          # This repository's tag names the archive: a patched build must not
+          # take the name of the OpenUSD release it is built from.
+          $version = "${{ github.ref_name }}".TrimStart("v")
           $archiveName = "Lumengine.USD_$version.${{ matrix.platform }}.py3.11_${{ matrix.variant_name }}.zip"
 
           echo "ARCHIVE_NAME=$archiveName" >> $env:GITHUB_OUTPUT
@@ -149,7 +163,7 @@ jobs:
       id: archive-linux
       shell: bash
       run: |
-          TAG=$(git describe --tags)
+          TAG="${{ github.ref_name }}"
           VERSION=${TAG#v}
           ARCHIVE_NAME="Lumengine.USD_${VERSION}.${{ matrix.platform }}.py3.11_${{ matrix.variant_name }}.tar.gz"
 

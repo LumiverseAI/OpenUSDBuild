@@ -1,0 +1,124 @@
+diff --git a/pxr/usdImaging/usdImaging/niPrototypePropagatingSceneIndex.cpp b/pxr/usdImaging/usdImaging/niPrototypePropagatingSceneIndex.cpp
+index 8a2357594..8543324fd 100644
+--- a/pxr/usdImaging/usdImaging/niPrototypePropagatingSceneIndex.cpp
++++ b/pxr/usdImaging/usdImaging/niPrototypePropagatingSceneIndex.cpp
+@@ -44,10 +44,15 @@ class UsdImagingNiPrototypePropagatingSceneIndex::_SceneIndexCache
+ public:
+     _SceneIndexCache(HdSceneIndexBasePtr const &inputSceneIndex,
+                      const TfTokenVector &instanceDataSourceNames,
+-                     const SceneIndexAppendCallback &sceneIndexAppendCallback)
++                     const SceneIndexAppendCallback &sceneIndexAppendCallback,
++                     HdContainerDataSourceHandle const &flattenedDataSourceProviders)
+       : _inputSceneIndex(inputSceneIndex)
+       , _instanceDataSourceNames(instanceDataSourceNames)
+       , _sceneIndexAppendCallback(sceneIndexAppendCallback)
++      , _flattenedDataSourceProviders(
++            flattenedDataSourceProviders
++                ? flattenedDataSourceProviders
++                : UsdImagingFlattenedDataSourceProviders())
+     {
+     }
+ 
+@@ -204,7 +209,7 @@ private:
+         sceneIndex =
+             HdFlatteningSceneIndex::New(
+                 sceneIndex,
+-                UsdImagingFlattenedDataSourceProviders());
++                _flattenedDataSourceProviders);
+         if (_sceneIndexAppendCallback) {
+             // Typically adds the UsdImagingDrawModeSceneIndex.
+             sceneIndex =
+@@ -289,6 +294,7 @@ private:
+     const HdSceneIndexBasePtr _inputSceneIndex;
+     const TfTokenVector _instanceDataSourceNames;
+     const SceneIndexAppendCallback _sceneIndexAppendCallback;
++    const HdContainerDataSourceHandle _flattenedDataSourceProviders;
+ 
+     // Nested map.
+     std::map<TfToken, _SceneIndices2> _prototypeToBindingHashToSceneIndices;
+@@ -338,6 +344,19 @@ UsdImagingNiPrototypePropagatingSceneIndex::New(
+     HdSceneIndexBaseRefPtr const &inputSceneIndex,
+     const TfTokenVector &instanceDataSourceNames,
+     const SceneIndexAppendCallback &sceneIndexAppendCallback)
++{
++    return New(inputSceneIndex,
++               instanceDataSourceNames,
++               sceneIndexAppendCallback,
++               /* flattenedDataSourceProviders = */ nullptr);
++}
++
++UsdImagingNiPrototypePropagatingSceneIndexRefPtr
++UsdImagingNiPrototypePropagatingSceneIndex::New(
++    HdSceneIndexBaseRefPtr const &inputSceneIndex,
++    const TfTokenVector &instanceDataSourceNames,
++    const SceneIndexAppendCallback &sceneIndexAppendCallback,
++    HdContainerDataSourceHandle const &flattenedDataSourceProviders)
+ {
+     return _New(inputSceneIndex,
+                 /* prototypeName = */ TfToken(),
+@@ -345,7 +364,8 @@ UsdImagingNiPrototypePropagatingSceneIndex::New(
+                 std::make_shared<_SceneIndexCache>(
+                     HdSceneIndexBasePtr(inputSceneIndex),
+                     instanceDataSourceNames,
+-                    sceneIndexAppendCallback));
++                    sceneIndexAppendCallback,
++                    flattenedDataSourceProviders));
+ }
+ 
+ UsdImagingNiPrototypePropagatingSceneIndexRefPtr
+diff --git a/pxr/usdImaging/usdImaging/niPrototypePropagatingSceneIndex.h b/pxr/usdImaging/usdImaging/niPrototypePropagatingSceneIndex.h
+index 33cd21f99..aa998f95d 100644
+--- a/pxr/usdImaging/usdImaging/niPrototypePropagatingSceneIndex.h
++++ b/pxr/usdImaging/usdImaging/niPrototypePropagatingSceneIndex.h
+@@ -309,6 +309,21 @@ public:
+         const TfTokenVector &instanceDataSourceNames,
+         const SceneIndexAppendCallback &sceneIndexAppendCallback);
+ 
++    // As above, with the flattened data source providers the flattening
++    // scene index inserted for each prototype uses. A null container means
++    // UsdImagingFlattenedDataSourceProviders().
++    //
++    // The use case is a renderer that resolves some inherited data itself,
++    // for example the transform and the visibility, and must not receive
++    // them flattened.
++    //
++    USDIMAGING_API
++    static UsdImagingNiPrototypePropagatingSceneIndexRefPtr New(
++        HdSceneIndexBaseRefPtr const &inputSceneIndex,
++        const TfTokenVector &instanceDataSourceNames,
++        const SceneIndexAppendCallback &sceneIndexAppendCallback,
++        HdContainerDataSourceHandle const &flattenedDataSourceProviders);
++
+     USDIMAGING_API
+     ~UsdImagingNiPrototypePropagatingSceneIndex() override;
+ 
+diff --git a/pxr/usdImaging/usdImaging/sceneIndices.cpp b/pxr/usdImaging/usdImaging/sceneIndices.cpp
+index 1ac4c14dd..e851a4fa5 100644
+--- a/pxr/usdImaging/usdImaging/sceneIndices.cpp
++++ b/pxr/usdImaging/usdImaging/sceneIndices.cpp
+@@ -280,7 +280,8 @@ UsdImagingCreateSceneIndices(
+ 
+         sceneIndex =
+             UsdImagingNiPrototypePropagatingSceneIndex::New(
+-                sceneIndex, instanceDataSourceNames, callback);
++                sceneIndex, instanceDataSourceNames, callback,
++                createInfo.nativeInstancingFlattenedDataSourceProviders);
+     }
+ 
+     sceneIndex = result.postInstancingNoticeBatchingSceneIndex =
+diff --git a/pxr/usdImaging/usdImaging/sceneIndices.h b/pxr/usdImaging/usdImaging/sceneIndices.h
+index 8f858a7dd..1c9771561 100644
+--- a/pxr/usdImaging/usdImaging/sceneIndices.h
++++ b/pxr/usdImaging/usdImaging/sceneIndices.h
+@@ -49,6 +49,11 @@ struct UsdImagingCreateSceneIndicesInfo
+     bool displayUnloadedPrimsWithBounds = false;
+     /// A client can insert scene indices after stage scene index.
+     SceneIndexAppendCallback overridesSceneIndexCallback;
++    /// The flattened data source providers native instancing flattens each
++    /// prototype with. Null means UsdImagingFlattenedDataSourceProviders().
++    /// A renderer that resolves some inherited data itself (for example the
++    /// transform and the visibility) passes providers without it.
++    HdContainerDataSourceHandle nativeInstancingFlattenedDataSourceProviders;
+ };
+ 
+ /// Some scene indices in the chain of filtering scene indices created
